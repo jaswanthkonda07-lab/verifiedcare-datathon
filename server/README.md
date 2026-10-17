@@ -18,6 +18,9 @@ This backend is intentionally dependency-light and uses Node 20 built-in HTTP an
 ```bash
 cp .env.example .env
 # Keep real values only in a local ignored .env file.
+set -a
+source .env
+set +a
 node server.js
 curl http://localhost:8080/health
 ```
@@ -34,7 +37,10 @@ node --version
 The architecture should identify the IBM Z/LinuxONE environment, normally `s390x`. Run the API directly or with the available container runtime:
 
 ```bash
-PORT=8080 RUNTIME_NAME=IBM\ Z/LinuxONE node server.js
+set -a
+source .env
+set +a
+PORT=8080 RUNTIME_NAME='IBM Z/LinuxONE' node server.js
 curl http://localhost:8080/health
 curl http://localhost:8080/api/status
 ```
@@ -62,3 +68,8 @@ Create a service credential and provide its `url`, `username`, and `password` to
 ## Code Engine option
 
 Code Engine can host a public API or build/test worker, but it is not a substitute for demonstrating the required IBM Z/LinuxONE runtime. For the datathon evidence, run the final backend on the official IBM Z/LinuxONE environment and explain Code Engine only as an optional cloud front door or worker.
+
+
+## Internal ML scorer
+
+Set `ML_SERVICE_URL=http://127.0.0.1:9000` after starting the LinuxONE Python scorer. The Node API calls `/score` from `/api/documents/preflight` and returns only an explainable risk result. Raw patient documents are not sent to the scorer. The ML service is documented in `../ml-service/README.md` and must be trained and run on LinuxONE before claiming AI-on-Z evidence.

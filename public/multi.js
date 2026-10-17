@@ -87,8 +87,9 @@ document.querySelector('#analyzeButton')?.addEventListener('click', async () => 
   const summary = document.querySelector('#analysisSummary');
   if (!reviewFileData) { showToast('Upload a valid PDF before running the local check.'); return; }
   summary.textContent = API_BASE ? 'Sending document metadata to the IBM-backed preflight endpoint…' : 'Checking PDF signature, file hash, date/amount consistency, and duplicate signals…';
-  try { await api('/api/documents/preflight', { method: 'POST', body: JSON.stringify({ mime: 'application/pdf', size: reviewFileData.size, sha256: reviewFileData.hash, signature: true }) }); } catch { /* continue with local checks */ }
-  setTimeout(() => { summary.textContent = `Preflight complete: PDF signature valid, ${Math.round(reviewFileData.size / 1024)} KB, SHA-256 ${reviewFileData.hash.slice(0, 12)}… No authenticity guarantee — confirm the hospital source manually.`; showToast('Explainable preflight complete.'); }, 900);
+  let ml = null;
+  try { const result = await api('/api/documents/preflight', { method: 'POST', body: JSON.stringify({ mime: 'application/pdf', size: reviewFileData.size, sha256: reviewFileData.hash, signature: true }) }); ml = result?.ml || null; } catch { /* continue with local checks */ }
+  setTimeout(() => { const modelCopy = ml ? ` LinuxONE ML: ${ml.risk.toUpperCase()} (${ml.model}, ${ml.latency_ms} ms).` : ''; summary.textContent = `Preflight complete: PDF signature valid, ${Math.round(reviewFileData.size / 1024)} KB, SHA-256 ${reviewFileData.hash.slice(0, 12)}…${modelCopy} No authenticity guarantee — confirm the hospital source manually.`; showToast('Explainable preflight complete.'); }, 900);
 });
 const checks = [...document.querySelectorAll('.review-check')];
 function updateChecks() { const done = checks.filter((item) => item.checked).length; const count = document.querySelector('#reviewCheckCount'); if (count) count.textContent = `${done}/${checks.length} complete`; }

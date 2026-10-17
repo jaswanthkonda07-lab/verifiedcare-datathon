@@ -11,8 +11,10 @@ const CLOUDANT_PASSWORD = process.env.CLOUDANT_PASSWORD || '';
 const CAMPAIGN_DB = process.env.CLOUDANT_DATABASE || 'campaigns';
 const AUDIT_DB = process.env.CLOUDANT_AUDIT_DATABASE || 'audit_events';
 const RUNTIME_NAME = process.env.RUNTIME_NAME || 'IBM Z/LinuxONE target runtime';
+const ML_SERVICE_URL = (process.env.ML_SERVICE_URL || '').replace(/\/$/, '');
 
 const cloudantEnabled = Boolean(CLOUDANT_URL && CLOUDANT_USERNAME && CLOUDANT_PASSWORD);
+const mlEnabled = Boolean(ML_SERVICE_URL);
 const memory = {
   campaigns: new Map([['VC-0248', {
     _id: 'VC-0248', campaignId: 'VC-0248', title: 'Aarav’s cardiac surgery', hospital: 'Northstar Children’s Hospital',
@@ -94,6 +96,17 @@ async function saveAudit(event) {
   return event;
 }
 
+async function scoreWithMl(features) {
+  if (!mlEnabled) return null;
+  const response = await fetch(`${ML_SERVICE_URL}/score`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ features })
+  });
+  if (!response.ok) throw new Error(`ML service ${response.status}`);
+  return response.json();
+}
+
 function auditEvent(payload) {
   return {
     _id: `${Date.now()}-${crypto.randomBytes(5).toString('hex')}`,
@@ -109,10 +122,10 @@ async function route(req, res) {
   const parts = url.pathname.split('/').filter(Boolean);
 
   if (req.method === 'GET' && url.pathname === '/health') {
-    return json(res, 200, { ok: true, service: 'verifiedcare-api', runtime: RUNTIME_NAME, arch: process.arch, cloudant: cloudantEnabled });
+    return json(res, 200, { ok: true, service: 'verifiedcare-api', runtime: RUNTIME_NAME, arch: process.arch, cloudant: cloudantEnabled, mlService: mlEnabled });
   }
   if (req.method === 'GET' && url.pathname === '/api/status') {
-    return json(res, 200, { ok: true, mode: cloudantEnabled ? 'cloudant' : 'memory-fallback', runtime: RUNTIME_NAME, arch: process.arch, services: { cloudant: cloudantEnabled, audit: true } });
+    return json(res, 200, { ok: true, mode: cloudantEnabled ? 'cloudant' : 'memory-fallback', runtime: RUNTIME_NAME, arch: process.arch, services: { cloudant: cloudantEnabled, audit: true, ml: mlEnabled } });
   }
   if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'campaigns' && parts[2]) {
     const campaign = await getCampaign(parts[2]);
@@ -151,7 +164,18 @@ async function route(req, res) {
   if (req.method === 'POST' && url.pathname === '/api/documents/preflight') {
     const body = await readJson(req);
     const validPdf = body.mime === 'application/pdf' && Number(body.size) <= 5 * 1024 * 1024 && typeof body.sha256 === 'string' && body.sha256.length === 64;
-    return json(res, 200, { ok: true, assistiveOnly: true, validPdf, signals: { size: Number(body.size) <= 5 * 1024 * 1024, sha256Present: typeof body.sha256 === 'string', signature: Boolean(body.signature), authenticityGuaranteed: false } });
+    const features = body.features || {
+      amount_consistency: body.amountConsistency ?? 0.9,
+      date_consistency: body.dateConsistency ?? 0.9,
+      hospital_match: body.hospitalMatch ?? 0.9,
+      duplicate_similarity: body.duplicateSimilarity ?? 0.9,
+      route_consistency: body.routeConsistency ?? 0.9,
+      consent_present: body.consentPresent ?? 1.0,
+      page_count_normal: body.pageCountNormal ?? 0.9
+    };
+    let ml = null;
+    try { ml = await scoreWithMl(features); } catch (error) { console.warn('ML service unavailable:', error.message); }
+    return json(res, 200, { ok: true, assistiveOnly: true, validPdf, signals: { size: Number(body.size) <= 5 * 1024 * 1024, sha256Present: typeof body.sha256 === 'string', signature: Boolean(body.signature), authenticityGuaranteed: false }, ml });
   }
   return notFound(res);
 }

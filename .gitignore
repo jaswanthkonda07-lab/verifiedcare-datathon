@@ -4,3 +4,6 @@
 node_modules/
 .DS_Store
 *.log
+ml-service/models/
+__pycache__/
+*.pyc

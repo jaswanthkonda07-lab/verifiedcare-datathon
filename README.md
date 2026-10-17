@@ -101,3 +101,8 @@ Never commit `.env`, Cloudant credentials, IBM API keys, payment secrets, real h
 ## Start-to-finish setup guide
 
 For a beginner-friendly sequence from downloading the ZIP through LinuxONE execution, Cloudant configuration, GitHub Pages, integration testing, video recording, and Hack2skill submission, read `docs/start-to-finish-guide.md`.
+
+
+## LinuxONE AI/ML service
+
+The `ml-service/` directory now contains synthetic-data training, an explainable scikit-learn/XGBoost-compatible scoring service, and a Jupyter notebook. Run it on LinuxONE, capture the actual architecture/model/latency output, then set `ML_SERVICE_URL=http://127.0.0.1:9000` in the backend `.env`. The Node API will include the ML result in `/api/documents/preflight` without sending raw patient documents to the model.
