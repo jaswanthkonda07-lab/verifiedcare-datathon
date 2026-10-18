@@ -1,0 +1,14 @@
+{
+  "model_name": "XGBoost XGBClassifier",
+  "features": [
+    "amount_consistency",
+    "date_consistency",
+    "hospital_match",
+    "duplicate_similarity",
+    "route_consistency",
+    "consent_present",
+    "page_count_normal"
+  ],
+  "architecture": "s390x",
+  "trained_at": "2026-10-17T17:32:02Z"
+}

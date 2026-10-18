@@ -1,3 +1,6 @@
+const fs = require('fs');
+const path = require('path');
+const STATIC_PUBLIC_DIR = path.join(__dirname, '../public');
 const http = require('node:http');
 const crypto = require('node:crypto');
 
@@ -7,13 +10,15 @@ const MAX_BODY = 2 * 1024 * 1024;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
 const CLOUDANT_URL = (process.env.CLOUDANT_URL || '').replace(/\/$/, '');
 const CLOUDANT_USERNAME = process.env.CLOUDANT_USERNAME || '';
-const CLOUDANT_PASSWORD = process.env.CLOUDANT_PASSWORD || '';
+const CLOUDANT_APIKEY = process.env.CLOUDANT_APIKEY || '';
 const CAMPAIGN_DB = process.env.CLOUDANT_DATABASE || 'campaigns';
 const AUDIT_DB = process.env.CLOUDANT_AUDIT_DATABASE || 'audit_events';
 const RUNTIME_NAME = process.env.RUNTIME_NAME || 'IBM Z/LinuxONE target runtime';
 const ML_SERVICE_URL = (process.env.ML_SERVICE_URL || '').replace(/\/$/, '');
 
-const cloudantEnabled = Boolean(CLOUDANT_URL && CLOUDANT_USERNAME && CLOUDANT_PASSWORD);
+const cloudantEnabled = Boolean(CLOUDANT_URL && CLOUDANT_APIKEY);
+let iamAccessToken = '';
+let iamAccessTokenExpiresAt = 0;
 const mlEnabled = Boolean(ML_SERVICE_URL);
 const memory = {
   campaigns: new Map([['VC-0248', {
@@ -50,13 +55,43 @@ async function readJson(req) {
   return data ? JSON.parse(data) : {};
 }
 
+async function getIamAccessToken() {
+  if (iamAccessToken && Date.now() < iamAccessTokenExpiresAt - 60000) {
+    return iamAccessToken;
+  }
+
+  const response = await fetch('https://iam.cloud.ibm.com/identity/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Accept': 'application/json'
+    },
+    body: new URLSearchParams({
+      grant_type: 'urn:ibm:params:oauth:grant-type:apikey',
+      apikey: CLOUDANT_APIKEY
+    } ).toString()
+  });
+
+  const body = await response.json();
+
+  if (!response.ok || !body.access_token) {
+    throw new Error(`IBM IAM token request failed: ${response.status}`);
+  }
+
+  iamAccessToken = body.access_token;
+  iamAccessTokenExpiresAt = Date.now() + Number(body.expires_in || 3600) * 1000;
+  return iamAccessToken;
+}
+
 async function cloudant(path, options = {}) {
   if (!cloudantEnabled) return null;
-  const token = Buffer.from(`${CLOUDANT_USERNAME}:${CLOUDANT_PASSWORD}`).toString('base64');
+
+  const accessToken = await getIamAccessToken();
+
   const response = await fetch(`${CLOUDANT_URL}${path}`, {
     ...options,
     headers: {
-      Authorization: `Basic ${token}`,
+      Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
       ...(options.headers || {})
     }
@@ -119,6 +154,25 @@ function auditEvent(payload) {
 async function route(req, res) {
   if (req.method === 'OPTIONS') return json(res, 204, {});
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  if (req.method === 'GET' && !url.pathname.startsWith('/api/') && !['/health', '/favicon.ico'].includes(url.pathname)) {
+    const requested = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
+    const filePath = path.resolve(STATIC_PUBLIC_DIR, '.' + requested);
+    if (filePath.startsWith(STATIC_PUBLIC_DIR + path.sep)) {
+      fs.readFile(filePath, (error, data) => {
+        if (error) {
+          res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end('Not found');
+          return;
+        }
+        const ext = path.extname(filePath).toLowerCase();
+        const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon' };
+        res.writeHead(200, { 'Content-Type': types[ext] || 'application/octet-stream' });
+        res.end(data);
+      });
+      return;
+    }
+  }
+
   const parts = url.pathname.split('/').filter(Boolean);
 
   if (req.method === 'GET' && url.pathname === '/health') {

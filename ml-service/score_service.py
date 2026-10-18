@@ -57,6 +57,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    port = 9000
-    print(f"VerifiedCare ML service listening on 127.0.0.1:{port} ({platform.machine()})")
-    HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+    import os
+    port = int(os.environ.get("PORT", "9000"))
+    host = os.environ.get("HOST", "0.0.0.0")
+    print(f"VerifiedCare ML service listening on {host}:{port} ({platform.machine()})")
+    HTTPServer((host, port), Handler).serve_forever()
